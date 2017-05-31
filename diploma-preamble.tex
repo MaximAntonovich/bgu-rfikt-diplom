@@ -46,6 +46,15 @@
 \setlist{nolistsep}
 
 \usepackage{titlesec}
+
+\usepackage{etoolbox}
+
+\makeatletter
+\patchcmd{\ttlh@hang}{\parindent\z@}{\parindent\z@\leavevmode}{}{}
+\patchcmd{\ttlh@hang}{\noindent}{}{}{}
+\makeatother
+
+
 \titleformat{\chapter}[display]{\filcenter\bfseries\Large}{}{8pt}{}{}
 \titleformat{\section}{\bfseries\Large}{\thesection}{1em}{}{}
 \titleformat{\subsection}{\bfseries\normalsize}{\thesubsection}{1em}{}{}
