@@ -65,8 +65,8 @@
 \stepcounter{chapter}
 \phantomsection
 \chapter*{ГЛАВА 3\\
-  НАЗВАНИЕ ГЛАВЫ}
-\addcontentsline{toc}{chapter}{Глава 3. Название главы}
+  АНАЛИЗ ЭКСПЕРИМЕНТАЛЬНЫХ ДАННЫХ}
+\addcontentsline{toc}{chapter}{Глава 3. Анализ экспериментальных данных}
 \setcounter{section}{0}
 
 \input{diploma-chapter-3}
@@ -91,19 +91,15 @@
 
 {\small \bibliography{diploma-bibliography}}
 
-%%% описание приложения
-
 \phantomsection
 % хак для выравнивания слова "Приложение" по правому краю - куча неразрывных пробелов:
 \chapter*{~~~~~~~~~~~~~~~~~~~~~~~~~~~
   ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  ПРИЛОЖЕНИЕ\\
-  НАЗВАНИЕ ПРИЛОЖЕНИЯ}
-\addcontentsline{toc}{chapter}{Приложение. Название приложения}
+  ПРИЛОЖЕНИЕ А\\
+  ИСХОДНЫЙ КОД}
+\addcontentsline{toc}{chapter}{Приложение А. Исходный код}
 \stepcounter{attachcnt}
 
 \input{diploma-attachment}
-
-%%% конец документа
 
 \end{document}

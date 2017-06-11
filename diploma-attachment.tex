@@ -1,1 +1,673 @@
-\input{diploma-dummy-page}
+\lstdefinestyle{mystyle}{
+    basicstyle=\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+ 
+\lstset{style=mystyle}
+
+
+\begin{lstlisting}[columns=fullflexible,language=Python]
+==> clustering.py <==
+from sklearn.cluster import AgglomerativeClustering
+from plot_hierarchical_clustering_dendrogram import save_dendrogram
+from sklearn.manifold import TSNE
+import matplotlib.pyplot as plt
+colors=['#12efff','#eee111','#1eff1f','#e00fff','#123456','#abc222','#000000','#123fff','#1eff1f','#2edf4f','#2eaf9f','#22222f'
+        '#eeeff1','#eee112','#00ef00','#aa0000','#0000aa','#000999','#32efff','#23ef68','#2e3f56','#7eef1f','#eeef11']
+
+def plot_profile(data,name,clusterer):
+    plt.clf()
+    plt.cla()
+    fig = data.T.plot(legend=False,color=list(map(lambda i: colors[i], clusterer.labels_))).get_figure()
+    fig.savefig(name.replace('dendrograms','profiles'))
+    plt.close()
+
+def plot_sne(data,name,clusterer):
+    plt.clf()
+    plt.cla()
+    model = TSNE(learning_rate=100, metric='euclidean', method='exact', perplexity=9, early_exaggeration=1)
+    embedded_data = model.fit_transform(data)
+    fig = plt.scatter(embedded_data[:, 0], embedded_data[:, 1],c=list(map(lambda i: colors[i], clusterer.labels_))).get_figure()
+    fig.savefig(name.replace('dendrograms', 'tsne'))
+    plt.close()
+
+def analyze_cluster(data, name, mute=False):
+    clusterer = AgglomerativeClustering(n_clusters=4, affinity='euclidean')
+    clusterer.fit(data)
+    if not mute:
+        save_dendrogram(clusterer, name)
+        plot_profile(data,name,clusterer)
+        plot_sne(data,name,clusterer)
+    return clusterer.labels_
+==> feature_analysis.py <==
+from lapscore import make_lp
+from SPEC import make_spec
+from MCFS import make_mcfs
+from NDFS import make_ndfs
+from UDFS import make_udfs
+from low_variance import make_low_variance
+from plot_hist import plot_hist
+import matplotlib.pyplot as plt
+from hierarchical_clustering import hclust
+from sklearn import metrics as m
+import numpy as np
+import pandas as pd
+
+execfile('load_data.py')
+n_features = 20
+normalized = annotated_exons
+udfs_pos = normalized.var()
+udfs_pos = udfs_pos.as_matrix().flatten()
+
+udfs_indexes = np.argsort(udfs_pos)
+udfs_values = np.sort(udfs_pos)
+make_low_variance(annotated_exons,0.1)
+valuable_features_udfs = pd.DataFrame(udfs_values[-n_features:],np.array(annotated_exons.iloc[:,udfs_indexes[-n_features:]].columns.values))
+valuable_features_udfs.to_csv('output/low_variance_valuable_features.csv')
+#valuable_features_cosine.to_csv('output/ndfs_cosine_valuable_features.csv')
+#valuable_features_euclidean.to_csv('output/ndfs_euclidean_valuable_features.csv')
+
+initial_score = hclust(annotated_exons)
+metrics = [m.v_measure_score(initial_score,initial_score)]
+for i in range(1400,5,-5):
+   current_score = hclust(annotated_exons.iloc[:,np.argsort(udfs_pos)[-i:]])
+   metrics.append(m.v_measure_score(initial_score,current_score))
+
+plt.plot(range(0,1400,5),metrics)
+plt.show()
+
+#plot_hist(udfs_pos,10,'red')
+#plot_hist(lp_euclidean,100,'green')
+==> feature_selection_blobdata.py <==
+from scipy.cluster import hierarchy
+from scipy.cluster.hierarchy import dendrogram
+from sklearn.datasets import make_blobs
+from matplotlib import pyplot as plt
+
+import pandas as pd
+
+from hierarchical_clustering import hclust
+from plot_corr import plot_corr
+from plot_hierarchical_clustering_dendrogram import plot_dendrogram
+
+(X, y) = make_blobs(n_samples=100, n_features=1438, centers=4)
+
+X_normalized = (X - X.mean()) / (X.max() - X.min())
+global unnormalized
+global normalized
+
+unnormalized = pd.DataFrame(X, ['Row'+str(i) for i in range(1, len(X)+1)])
+normalized = pd.DataFrame(X_normalized, index=['Row'+str(i) for i in range(1, len(X_normalized)+1)])
+
+dendrogram(hierarchy.linkage(normalized))
+plt.show()
+#main(normalized, unnormalized, 'blob')
+==> feature_selection.py <==
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import sklearn.metrics as m
+
+from MCFS import make_mcfs
+from NDFS import make_ndfs
+from SPEC import make_spec
+from UDFS import make_udfs
+from clustering import analyze_cluster
+from lapscore import make_lp
+
+EUCLIDEAN = 'euclidean'
+COSINE = 'cosine'
+
+ALL = -1
+ALL_EXCEPT_FIRST = 0
+
+N_CLUSTERS = 4
+N_FEATURES = 35
+N_ALL_FEATURES = 1438
+
+global clust_report_writer
+
+
+def evaluate_feature_score(name, feature_scores):
+    column_names = ["N of features", "v measure", "adj mutual info", "adj rand score"]
+    scores_evaluating = pd.DataFrame(columns=column_names)
+    for k in range(0, N_ALL_FEATURES, 2):
+        selected_scores = feature_scores[range(k, N_ALL_FEATURES)]
+        if 'unnorm' in name:
+            clustering_selected = analyze_cluster(unnormalized[selected_scores.columns],
+                                                  name.replace('graphics', 'selection_graphics'), True)
+            clustering_full = clustering_unnormalized
+        else:
+            clustering_selected = analyze_cluster(normalized[selected_scores.columns],
+                                                  name.replace('graphics', 'selection_graphics'), True)
+            clustering_full = clustering_normalized
+        scores_evaluating = scores_evaluating.append(
+            {column_names[0]: k,
+             column_names[1]: m.v_measure_score(clustering_full, clustering_selected),
+             column_names[2]: m.adjusted_mutual_info_score(clustering_full, clustering_selected),
+             column_names[3]: m.adjusted_rand_score(clustering_full, clustering_selected)}, ignore_index=True)
+    scores_evaluating[column_names[1:]].plot().get_figure().savefig(
+        name.replace('graphics', 'selection_graphics').replace('.png', '_evaluated.png'))
+    plt.clf()
+    plt.cla()
+    plt.close()
+
+
+def plot_out_feature_score(scores, name):
+    if 'unnorm' in name:
+        clustering_selected = analyze_cluster(unnormalized[scores.index],
+                                              name.replace('graphics', 'dendrograms'))
+        clustering_full = clustering_unnormalized
+    else:
+        clustering_selected = analyze_cluster(normalized[scores.index],
+                                              name.replace('graphics', 'dendrograms'))
+        clustering_full = clustering_normalized
+    clust_report_writer.write('--------------------\n')
+    clust_report_writer.write(name + '\n')
+    clust_report_writer.write(str(m.v_measure_score(clustering_full, clustering_selected)) + '\n')
+    clust_report_writer.write(str(m.adjusted_mutual_info_score(clustering_full, clustering_selected)) + '\n')
+    clust_report_writer.write(str(m.adjusted_rand_score(clustering_full, clustering_selected)) + '\n')
+
+
+def save_plot(data, name, mute=False):
+    global unnormalized
+    global normalized
+    plt.xlabel('feature')
+    plt.ylabel('score value')
+    plt.plot(np.sort(data))
+    plt.savefig(name)
+    plt.clf()
+    plt.cla()
+    plt.close()
+    if 'unnorm' in name:
+        columns = unnormalized.columns.values.tolist()
+    else:
+        columns = normalized.columns.values.tolist()
+    importances = pd.DataFrame(columns=columns, data=data.reshape((1, N_ALL_FEATURES)),
+                               dtype=float)
+    importances.iloc[0].plot.hist(bins=200).get_figure().savefig(name.replace('graphics', 'histograms'))
+    plt.clf()
+    plt.cla()
+    plt.close()
+    asc = 'lp' in name or 'spec' in name
+    importances_sorted = importances.sort_values(by=[0], axis=1, ascending=asc)
+    evaluate_feature_score(name, importances_sorted)
+    selected_features = importances_sorted.ix[0, range(0, N_FEATURES)]
+    if not mute:
+        selected_features.to_csv(name.replace('graphics', 'reports').replace('png', 'csv'))
+        plot_out_feature_score(selected_features, name)
+    return selected_features
+
+
+def process_multicluster(data, name):
+    clusters_features_list = [save_plot(data[:, 0], name, True)]
+    for i in range(1, N_CLUSTERS):
+        clusters_features_list.append(save_plot(data[:, i], name.replace('1', str(i + 1)), True))
+    clusters_features = pd.concat(clusters_features_list)
+    clusters_features.sort_values(inplace=True, ascending=False)
+    selected_features_deduplicated = clusters_features.drop_duplicates()
+    selected_features = selected_features_deduplicated.groupby(selected_features_deduplicated.index).first()[
+        range(0, N_FEATURES)]
+    plot_out_feature_score(selected_features, name.replace('1', 'all'))
+    selected_features.to_csv(name.replace('graphics', 'reports').replace('1c','all').replace('png', 'csv'))
+    plot_out_feature_score(selected_features, name)
+    selected_features.plot.hist(bins=200).get_figure().savefig(name.replace('graphics', 'histograms').replace('1c', 'all'))
+    plt.clf()
+    plt.cla()
+    plt.close()
+
+
+verified_rnas = pd.read_table('Data/verified_rnas.txt')
+predicted_rnas = pd.read_table('Data/predicted_rnas.txt')
+
+annotated_exons = pd.read_table('Data/annotated_exons.txt')
+annotated_exons.set_index('Exon', inplace=True)
+
+unnormalized = annotated_exons
+normalized = (annotated_exons - annotated_exons.mean()) / (annotated_exons.max() - annotated_exons.min())
+clustering_normalized = analyze_cluster(normalized, 'output/exons/dendrograms/original_normalized.png')
+clustering_unnormalized = analyze_cluster(unnormalized, 'output/exons/dendrograms/original_unnormalized.png')
+
+global clustering_unnormalized
+global clustering_normalized
+
+def main(normalized, unnormalized, prefix):
+    global clust_report_writer
+    clust_report_writer = open('output/' + prefix + '/clustering_reports/fs_report.txt', 'w')
+
+    lp_unnorm_euclidean = make_lp(unnormalized, EUCLIDEAN)
+    save_plot(lp_unnorm_euclidean, 'output/' + prefix + '/graphics/lp_unnorm_euclidean.png')
+    lp_unnorm_cosine = make_lp(unnormalized, COSINE)
+    save_plot(lp_unnorm_cosine, 'output/' + prefix + '/graphics/lp_unnorm_cosine.png')
+
+    lp_norm_euclidean = make_lp(normalized, EUCLIDEAN)
+    save_plot(lp_norm_euclidean, 'output/' + prefix + '/graphics/lp_norm_euclidean.png')
+    lp_norm_cosine = make_lp(normalized, COSINE)
+    save_plot(lp_norm_cosine, 'output/' + prefix + '/graphics/lp_norm_cosine.png')
+
+    spec_unnorm_euclidean_all = make_spec(unnormalized, EUCLIDEAN, ALL)
+    save_plot(spec_unnorm_euclidean_all, 'output/' + prefix + '/graphics/spec_unnorm_euclidean.png')
+    spec_unnorm_cosine_all = make_spec(unnormalized, COSINE, ALL)
+    save_plot(spec_unnorm_cosine_all, 'output/' + prefix + '/graphics/spec_unnorm_cosine.png')
+
+    spec_unnorm_euclidean_aec = make_spec(unnormalized, EUCLIDEAN, ALL_EXCEPT_FIRST)
+    save_plot(spec_unnorm_euclidean_aec, 'output/' + prefix + '/graphics/spec_unnorm_euclidean_no_first.png')
+    spec_unnorm_cosine_aec = make_spec(unnormalized, COSINE, ALL_EXCEPT_FIRST)
+    save_plot(spec_unnorm_cosine_aec, 'output/' + prefix + '/graphics/spec_unnorm_cosine_no_first.png')
+
+    spec_norm_euclidean_all = make_spec(normalized, EUCLIDEAN, ALL)
+    save_plot(spec_norm_euclidean_all, 'output/' + prefix + '/graphics/spec_norm_euclidean.png')
+    spec_norm_cosine_all = make_spec(normalized, COSINE, ALL)
+    save_plot(spec_norm_cosine_all, 'output/' + prefix + '/graphics/spec_norm_cosine.png')
+
+    spec_norm_euclidean_aec = make_spec(normalized, EUCLIDEAN, ALL_EXCEPT_FIRST)
+    save_plot(spec_norm_euclidean_aec, 'output/' + prefix + '/graphics/spec_norm_euclidean_no_first.png')
+    spec_norm_cosine_aec = make_spec(normalized, COSINE, ALL_EXCEPT_FIRST)
+    save_plot(spec_norm_cosine_aec, 'output/' + prefix + '/graphics/spec_norm_cosine_no_first.png')
+
+    udfs_norm = make_udfs(normalized, N_CLUSTERS)
+    process_multicluster(udfs_norm, 'output/' + prefix + '/graphics/udfs_norm_1c.png')
+
+    udfs_unnorm = make_udfs(unnormalized, N_CLUSTERS)
+    process_multicluster(udfs_unnorm, 'output/' + prefix + '/graphics/udfs_unnorm_1c.png')
+
+    mcfs_unnorm_euclidean = make_mcfs(unnormalized, N_FEATURES, EUCLIDEAN, N_CLUSTERS)
+    process_multicluster(mcfs_unnorm_euclidean, 'output/' + prefix + '/graphics/mcfs_unnorm_euclidean_1c.png')
+
+    mcfs_unnorm_cosine = make_mcfs(unnormalized, N_FEATURES, COSINE, N_CLUSTERS)
+    process_multicluster(mcfs_unnorm_cosine, 'output/' + prefix + '/graphics/mcfs_unnorm_cosine_1c.png')
+
+    mcfs_norm_euclidean = make_mcfs(normalized, N_FEATURES, EUCLIDEAN, N_CLUSTERS)
+    process_multicluster(mcfs_norm_euclidean, 'output/' + prefix + '/graphics/mcfs_norm_euclidean_1c.png')
+
+    mcfs_norm_cosine = make_mcfs(normalized, N_FEATURES, COSINE, N_CLUSTERS)
+    process_multicluster(mcfs_norm_cosine, 'output/' + prefix + '/graphics/mcfs_norm_cosine_1c.png')
+
+    ndfs_unnorm_euclidean = make_ndfs(unnormalized, EUCLIDEAN, N_CLUSTERS)
+    process_multicluster(ndfs_unnorm_euclidean, 'output/' + prefix + '/graphics/ndfs_unnorm_euclidean_1c.png')
+
+    ndfs_unnorm_cosine = make_ndfs(unnormalized, COSINE, N_CLUSTERS)
+    process_multicluster(ndfs_unnorm_cosine, 'output/' + prefix + '/graphics/ndfs_unnorm_cosine_1c.')
+
+    ndfs_norm_euclidean = make_ndfs(normalized, EUCLIDEAN, N_CLUSTERS)
+    process_multicluster(ndfs_norm_euclidean, 'output/' + prefix + '/graphics/ndfs_norm_euclidean_1c.png')
+
+    ndfs_norm_cosine = make_ndfs(normalized, COSINE, N_CLUSTERS)
+    process_multicluster(ndfs_norm_cosine, 'output/' + prefix + '/graphics/ndfs_norm_cosine_1c.png')
+
+    lv_norm = np.var(normalized, axis=0)
+    save_plot(lv_norm, 'output/' + prefix + '/graphics/lv_norm.png')
+
+    clust_report_writer.close()
+
+
+if __name__ == '__main__':
+    print(m.v_measure_score(clustering_unnormalized, clustering_normalized))
+    print(m.adjusted_mutual_info_score(clustering_unnormalized, clustering_normalized))
+    print(m.adjusted_rand_score(clustering_unnormalized, clustering_normalized))
+    main(normalized, unnormalized, 'exons')
+
+==> genetic_feature_selection.py <==
+#    This file is part of DEAP.
+#
+#    DEAP is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU Lesser General Public License as
+#    published by the Free Software Foundation, either version 3 of
+#    the License, or (at your option) any later version.
+#
+#    DEAP is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+#    GNU Lesser General Public License for more details.
+#
+#    You should have received a copy of the GNU Lesser General Public
+#    License along with DEAP. If not, see <http://www.gnu.org/licenses/>.
+
+
+#    example which maximizes the sum of a list of integers
+#    each of which can be 0 or 1
+
+import random
+
+from deap import base
+from deap import creator
+from deap import tools
+
+from feature_selection import normalized, clustering_normalized
+from clustering import analyze_cluster
+import sklearn.metrics as m
+
+
+def mutFlipBit(individual, indpb):
+    """Flip the value of the attributes of the input individual and return the
+    mutant. The *individual* is expected to be a :term:`sequence` and the values of the
+    attributes shall stay valid after the ``not`` operator is called on them.
+    The *indpb* argument is the probability of each attribute to be
+    flipped. This mutation is usually applied on boolean individuals.
+
+    :param individual: Individual to be mutated.
+    :param indpb: Independent probability for each attribute to be flipped.
+    :returns: A tuple of one individual.
+
+    This function uses the :func:`~random.random` function from the python base
+    :mod:`random` module.
+    """
+    for i in xrange(len(individual)):
+            if individual[i] == 1:
+                if random.random() < indpb:
+                    individual[i] = type(individual[i])(not individual[i])
+            else:
+                if random.random() > indpb:
+                    individual[i] = type(individual[i])(not individual[i])
+
+    return individual,
+
+
+creator.create("FitnessMax", base.Fitness, weights=(1.0,))
+creator.create("Individual", list, fitness=creator.FitnessMax)
+
+toolbox = base.Toolbox()
+
+# Attribute generator
+#                      define 'attr_bool' to be an attribute ('gene')
+#                      which corresponds to integers sampled uniformly
+#                      from the range [0,1] (i.e. 0 or 1 with equal
+#                      probability)
+toolbox.register("attr_bool", random.randint, 0, 1)
+
+# Structure initializers
+#                         define 'individual' to be an individual
+#                         consisting of 100 'attr_bool' elements ('genes')
+toolbox.register("individual", tools.initRepeat, creator.Individual,
+                 toolbox.attr_bool, 1438)
+
+# define the population to be a list of individuals
+toolbox.register("population", tools.initRepeat, list, toolbox.individual)
+
+
+# the goal ('fitness') function to be maximized
+def evalOneMax(individual):
+    indexes = [i for i, x in enumerate(individual) if x == 1]
+    return m.adjusted_mutual_info_score(clustering_normalized, analyze_cluster(normalized.iloc[:, indexes], 'selected', True)) - sum(individual) / 1438.0,
+
+
+# ----------
+# Operator registration
+# ----------
+# register the goal / fitness function
+toolbox.register("evaluate", evalOneMax)
+
+# register the crossover operator
+toolbox.register("mate", tools.cxTwoPoint)
+
+# register a mutation operator with a probability to
+# flip each attribute/gene of 0.05
+toolbox.register("mutate", mutFlipBit, indpb=0.95)
+
+# operator for selecting individuals for breeding the next
+# generation: each individual of the current generation
+# is replaced by the 'fittest' (best) of three individuals
+# drawn randomly from the current generation.
+toolbox.register("select", tools.selTournament, tournsize=3)
+
+
+# ----------
+
+def main():
+
+    # create an initial population of 300 individuals (where
+    # each individual is a list of integers)
+    pop = toolbox.population(n=300)
+
+    # CXPB  is the probability with which two individuals
+    #       are crossed
+    #
+    # MUTPB is the probability for mutating an individual
+    #
+    # NGEN  is the number of generations for which the
+    #       evolution runs
+    CXPB, MUTPB, NGEN = 0.7, 0.4, 400
+
+    print("Start of evolution")
+
+    # Evaluate the entire population
+    fitnesses = list(map(toolbox.evaluate, pop))
+    for ind, fit in zip(pop, fitnesses):
+        ind.fitness.values = fit
+
+    print("  Evaluated %i individuals" % len(pop))
+
+    # Begin the evolution
+    for g in range(NGEN):
+        print("-- Generation %i --" % g)
+
+        # Select the next generation individuals
+        offspring = toolbox.select(pop, len(pop))
+        # Clone the selected individuals
+        offspring = list(map(toolbox.clone, offspring))
+
+        # Apply crossover and mutation on the offspring
+        for child1, child2 in zip(offspring[::2], offspring[1::2]):
+
+            # cross two individuals with probability CXPB
+            if random.random() < CXPB:
+                toolbox.mate(child1, child2)
+
+                # fitness values of the children
+                # must be recalculated later
+                del child1.fitness.values
+                del child2.fitness.values
+
+        for mutant in offspring:
+
+            # mutate an individual with probability MUTPB
+            if random.random() < MUTPB:
+                toolbox.mutate(mutant)
+                del mutant.fitness.values
+
+        # Evaluate the individuals with an invalid fitness
+        invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
+        fitnesses = map(toolbox.evaluate, invalid_ind)
+        for ind, fit in zip(invalid_ind, fitnesses):
+            ind.fitness.values = fit
+
+        print("  Evaluated %i individuals" % len(invalid_ind))
+
+        # The population is entirely replaced by the offspring
+        pop[:] = offspring
+
+        # Gather all the fitnesses in one list and print the stats
+        fits = [ind.fitness.values[0] for ind in pop]
+
+        length = len(pop)
+        mean = sum(fits) / length
+        sum2 = sum(x * x for x in fits)
+        std = abs(sum2 / length - mean ** 2) ** 0.5
+
+        print("  Min %s" % min(fits))
+        print("  Max %s" % max(fits))
+        print("  Avg %s" % mean)
+        print("  Std %s" % std)
+
+    print("-- End of (successful) evolution --")
+
+    best_ind = tools.selBest(pop, 1)[0]
+    print("Best individual is %s, %s, %s" % (best_ind, best_ind.fitness.values, sum(best_ind)))
+
+
+if __name__ == "__main__":
+    main()
+
+==> hierarchical_clustering.py <==
+from kernel_pca import kernel_pca
+from scipy.cluster import hierarchy
+from sklearn import preprocessing
+import matplotlib.pyplot as plt
+
+plt.switch_backend('Qt5Agg')
+
+#execfile('load_data.py')
+def hclust(data):
+    min_max_scaler = preprocessing.MinMaxScaler()
+    annotated_exons_norm = min_max_scaler.fit_transform(data)
+
+    transformed_data = kernel_pca(annotated_exons_norm)
+
+    linkage_data = hierarchy.linkage(transformed_data,method='ward')
+
+    return hierarchy.fcluster(linkage_data,t=1,criterion='distance')
+==> kernel_pca.py <==
+from sklearn.decomposition import KernelPCA
+
+def kernel_pca(data):
+    pca_transform = KernelPCA(n_components=50,kernel="poly",degree=3,gamma = 1e-3)
+    return pca_transform.fit_transform(data)
+==> lapscore.py <==
+#coding UTF-8
+import skfeature.function.similarity_based.lap_score as lp
+from skfeature.utility.construct_W import construct_W
+
+
+def make_lp(data,metric):
+    return lp.lap_score(data.as_matrix(),W = construct_W(data.as_matrix(),metric=metric))
+print 'LP Score Success'
+
+==> load_data.py <==
+# coding UTF-8
+import pandas as p
+
+verified_rnas = p.read_table('Data/verified_rnas.txt')
+predicted_rnas = p.read_table('Data/predicted_rnas.txt')
+
+annotated_exons = p.read_table('Data/annotated_exons.txt')
+annotated_exons.set_index('Exon',inplace=True)
+
+print 'success'
+==> low_variance.py <==
+import skfeature.function.statistical_based.low_variance as lw
+
+def make_low_variance(data,th):
+    data = (data - data.mean()) / data.std()
+    return lw.low_variance_feature_selection(data.as_matrix(),th)
+
+print 'low variance success'
+==> MCFS.py <==
+import skfeature.function.sparse_learning_based.MCFS as m
+from skfeature.utility.construct_W import construct_W
+
+
+def make_mcfs(data,features,metric, n_clust):
+    return m.mcfs(data.as_matrix(),features,W = construct_W(data.as_matrix(),metric=metric),n_clusters=n_clust)
+
+print 'MCFS success'
+==> NDFS.py <==
+import skfeature.function.sparse_learning_based.NDFS as n
+from skfeature.utility.construct_W import construct_W
+
+
+def make_ndfs(data,metric,nclust):
+    return n.ndfs(data.as_matrix(),W=construct_W(data.as_matrix(),metric=metric),n_clusters=nclust)
+
+print 'ndfs success'
+==> plot_corr.py <==
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+
+
+def plot_corr(a):
+    plt.switch_backend('Qt5Agg')
+    plt.matshow(a.corr(),cmap=cm.Spectral_r)
+    plt.show()
+==> plot_heat.py <==
+import matplotlib.pyplot as plt
+
+def plot_heat(a):
+    plt.switch_backend('Qt5Agg')
+    plt.imshow(a)
+    plt.show()
+
+==> plot_hierarchical_clustering_dendrogram.py <==
+# Authors: Mathew Kallada
+# License: BSD 3 clause
+"""
+=========================================
+Plot Hierarachical Clustering Dendrogram 
+=========================================
+
+This example plots the corresponding dendrogram of a hierarchical clustering
+using AgglomerativeClustering and the dendrogram method available in scipy.
+"""
+
+import numpy as np
+
+from matplotlib import pyplot as plt
+from scipy.cluster.hierarchy import dendrogram
+
+
+def plot_dendrogram(model, **kwargs):
+    # Children of hierarchical clustering
+    children = model.children_
+
+    # Distances between each pair of children
+    # Since we don't have this information, we can use a uniform one for plotting
+    distance = np.arange(children.shape[0])
+
+    # The number of observations contained in each cluster level
+    no_of_observations = np.arange(2, children.shape[0] + 2)
+
+    # Create linkage matrix and then plot the dendrogram
+    linkage_matrix = np.column_stack([children, distance, no_of_observations]).astype(float)
+
+    # Plot the corresponding dendrogram
+    dendrogram(linkage_matrix, **kwargs)
+
+
+def save_dendrogram(model, name):
+    plt.clf()
+    plt.cla()
+    plt.title('Hierarchical Clustering Dendrogram')
+    plot_dendrogram(model, labels=model.labels_,color_threshold=95)
+    plt.savefig(name)
+    plt.clf()
+    plt.cla()
+    plt.close()
+
+==> plot_hist.py <==
+import matplotlib.pyplot as plt
+
+def plot_hist(data,nbins,color):
+    plt.switch_backend('Qt5Agg')
+    plt.hist(data,bins=nbins,color=color)
+    plt.show()
+
+print 'plot hist success'
+==> SPEC.py <==
+#coding UTF-8
+import skfeature.function.similarity_based.SPEC as sp
+from skfeature.utility.construct_W import construct_W
+
+
+def make_spec(data,metric,style):
+    return sp.spec(data.as_matrix(),W=construct_W(data.as_matrix(),metric=metric),style=style)
+
+print 'Success SPEC'
+==> UDFS.py <==
+import skfeature.function.sparse_learning_based.UDFS as u
+
+def make_udfs(data, n_clust):
+    return u.udfs(data.as_matrix(),n_clusters=n_clust)
+
+print 'UDFS success'
+==> write_csv.py <==
+import pandas as pd
+
+def write_csv(data,filename):
+    pd.DataFrame(data=data).to_csv("output/" + filename + ".csv")
+\end{lstlisting}
